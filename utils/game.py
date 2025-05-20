@@ -11,7 +11,10 @@ STANDING_TO_POSITIONS = {
 
 
 class CubieDerby:
-    def __init__(self):
+    def __init__(self, record_actions: bool = False):
+        # For debug and visualisation purposes
+        self.record_actions = record_actions
+
         # Game specific variables
         self.cubes = None
         self.num_of_cubes = None
@@ -26,6 +29,7 @@ class CubieDerby:
                   num_of_pads: int,
                   starting_positions: dict = None,
                   randomize_order: bool = True,
+                  record_actions: bool = False,
                   ):
 
         from utils.cubes import CUBE_CLASSES
@@ -70,8 +74,9 @@ class CubieDerby:
                 break
 
             action = cube.take_turn()
-            action['positions'] = {c.name: (c.position, c.stack_order) for c in self.cubes}
-            actions_in_round.append(action)
+            if self.record_actions:
+                action['positions'] = {c.name: (c.position, c.stack_order) for c in self.cubes}
+                actions_in_round.append(action)
 
             # Check for the winner
             if cube.position + 1 >= self.num_of_pads:
@@ -79,10 +84,11 @@ class CubieDerby:
                 self.determine_standings()
                 break
 
-        self.game_summary['rounds'].append({
-            'actions': actions_in_round,
-            'turn_order': [c.name for c in turn_order]
-        })
+        if self.record_actions:
+            self.game_summary['rounds'].append({
+                'actions': actions_in_round,
+                'turn_order': [c.name for c in turn_order]
+            })
 
     def get_stack_at_position(self, position: int) -> List:
         return [c for c in self.cubes if c.position == position]
