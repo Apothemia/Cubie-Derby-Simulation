@@ -26,13 +26,12 @@ CUBE_COLOURS = {
 
 
 class CubeVisualisation(QGraphicsEllipseItem):
-    def __init__(self, name, x, y, stack_order=0):
-        size = 30
+    def __init__(self, name, x, y, stack_order=0, size=30):
         super().__init__(x, y, size, size)
         self.name = name
         self.stack_order = stack_order
 
-        # Set color based on the cube name
+        # Set colour based on the cube name
         self.setBrush(QBrush(CUBE_COLOURS.get(name, QColor(128, 128, 128))))
 
         # Add a name label
@@ -123,6 +122,8 @@ class SimulationPanel(QWidget):
 class VisualisationPanel(QWidget):
     def __init__(self):
         super().__init__()
+        self.cube_visualisations: dict | None = None
+        self.cube_size = 30
         self.setup_ui()
 
     # noinspection PyAttributeOutsideInit
@@ -141,16 +142,30 @@ class VisualisationPanel(QWidget):
 
         # Information labels
         self.info_layout = QHBoxLayout()
-        self.turn_order_label = QLabel('Turn Order: ')
         self.round_label = QLabel('Starting Positions')
-        self.info_layout.addWidget(self.turn_order_label)
         self.info_layout.addWidget(self.round_label)
         layout.addLayout(self.info_layout)
 
         self.action_info_label = QLabel('Action Info: ')
         layout.addWidget(self.action_info_label)
 
-        # Create track visualization
+        # Create turn order visualisation
+        self.turn_order_layout = QHBoxLayout()
+
+        self.turn_order_label = QLabel('Turn Order')
+        self.turn_order_layout.addWidget(self.turn_order_label)
+        self.order_view = QGraphicsView()
+        self.turn_order_layout.addWidget(self.order_view)
+
+        self.order_scene = QGraphicsScene()
+        self.order_view.setScene(self.order_scene)
+        self.order_view.setFixedHeight(40)
+        self.order_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.order_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        layout.addLayout(self.turn_order_layout)
+
+        # Create track visualisation
         self.track_view = QGraphicsView()
         self.track_scene = QGraphicsScene()
         self.track_view.setScene(self.track_scene)
@@ -177,14 +192,27 @@ class VisualisationPanel(QWidget):
 
         layout.addStretch()
 
-    def draw_track(self):
+    def update_turn_order(self, cube_size=30, spacing=10):
+        self.order_scene.clear()
+
+        if not SimulationData.rounds:
+            return
+
+        turn_order = SimulationData.rounds[SimulationData.round_index]['turn_order']
+
+        self.order_scene.setSceneRect(0, 0, 1000, 40)
+
+        for i, cube_name in enumerate(turn_order):
+            x = spacing + i * (cube_size + spacing)
+            cube = CubeVisualisation(cube_name, x, 5)
+            self.order_scene.addItem(cube)
+
+    def draw_track(self, track_height=100, track_width=950):
         self.track_scene.clear()
 
         if not SimulationData.num_of_pads:
             return
 
-        track_height = 100
-        track_width = 950
         self.track_scene.addRect(25, track_height, track_width, 10, brush=QBrush(QColor(139, 69, 19)))
 
         # Draw pads (0 to num_of_pads)
@@ -194,14 +222,13 @@ class VisualisationPanel(QWidget):
             pad_text = self.track_scene.addText(str(i))
             pad_text.setPos(x - 5, track_height + 15)
 
-    def update_cube_positions(self, positions: dict):
+    def update_cube_positions(self, positions: dict,
+                              track_height=100, track_width=950, cube_size=30):
+
         # Clear cubes but keep track
         for item in self.track_scene.items():
             if isinstance(item, CubeVisualisation):
                 self.track_scene.removeItem(item)
-
-        track_height = 100
-        track_width = 950
 
         # Group cubes by position and sort by stack order
         position_groups = defaultdict(list)
@@ -213,11 +240,11 @@ class VisualisationPanel(QWidget):
             cubes.sort(key=lambda x: x[1])
 
             x_pos = 25 + (pos * (track_width / (SimulationData.num_of_pads - 1)))
-            y_base = track_height - 30
+            y_base = track_height - cube_size
 
             for i, (cube_name, stack_order) in enumerate(cubes):
                 y_offset = y_base - (i * 25)
-                cube = CubeVisualisation(cube_name, x_pos - 15, y_offset, stack_order)
+                cube = CubeVisualisation(cube_name, x_pos - 15, y_offset, stack_order, size=cube_size)
                 self.track_scene.addItem(cube)
 
     def update_action_info(self, action):
@@ -241,8 +268,7 @@ class VisualisationPanel(QWidget):
 
             if SimulationData.action_index == 0:
                 self.round_label.setText(f'Round: {SimulationData.round_index + 1}')
-                self.turn_order_label.setText(
-                    f'Turn Order: {SimulationData.rounds[SimulationData.round_index]["turn_order"]}')
+                self.update_turn_order()
 
             if (SimulationData.round_index == len(SimulationData.rounds) - 1 and
                     SimulationData.action_index == len(SimulationData.rounds[-1]['actions']) - 1):
@@ -258,23 +284,30 @@ class VisualisationPanel(QWidget):
 
             # Update round info if we moved to the previous round
             self.round_label.setText(f'Round: {SimulationData.round_index + 1}')
-            self.turn_order_label.setText(
-                f'Turn Order: {SimulationData.rounds[SimulationData.round_index]["turn_order"]}')
+            self.update_turn_order()
+
+        elif SimulationData.round_index == 0 and SimulationData.action_index == 0:
+            self.prev_action_button.setEnabled(False)
+            SimulationData.reset_indices()
+            self.round_label.setText('Starting Positions')
+            self.action_info_label.setText('Initial positions')
+            self.update_cube_positions(SimulationData.starting_positions)
+            self.update_turn_order()
+
 
     def next_round(self):
         self.prev_action_button.setEnabled(True)
 
         # Move to the start of the next round
         while SimulationData.next_action():
-            if SimulationData.action_index == 0:  # We've reached the start of a new round
+            if SimulationData.action_index == 0:
                 break
 
         action = SimulationData.get_current_action()
         if action:
             self.update_action_info(action)
             self.round_label.setText(f'Round: {SimulationData.round_index + 1}')
-            self.turn_order_label.setText(
-                f'Turn Order: {SimulationData.rounds[SimulationData.round_index]["turn_order"]}')
+            self.update_turn_order()
         else:
             self.standings_popup()
             self.next_action_button.setEnabled(False)
@@ -335,9 +368,9 @@ class CubieDerbyVisualiser(QMainWindow):
 
     def on_start_simulation(self):
         params = self.simulation_panel.get_simulation_params()
-        simulation = CubieDerby()
-        simulation.play_game(**params)
-        SimulationData.load_data(simulation.game_summary)
+        simulation = CubieDerby(record_actions=True, **params)
+        simulation.play_game()
+        SimulationData.load_data(simulation.get_game_data())
         self.update_visualization()
 
     def update_visualization(self):
@@ -356,7 +389,7 @@ class SimulationData:
     starting_positions = None
     rounds = None
     standings = None
-    round_index = -1
+    round_index = 0
     action_index = -1
 
     @classmethod
@@ -370,7 +403,7 @@ class SimulationData:
 
     @classmethod
     def reset_indices(cls):
-        cls.round_index = -1
+        cls.round_index = 0
         cls.action_index = -1
 
     @classmethod
@@ -389,6 +422,7 @@ class SimulationData:
         if cls.action_index + 1 < len(cls.rounds[cls.round_index]['actions']):
             cls.action_index += 1
             return True
+
         elif cls.round_index + 1 < len(cls.rounds):
             cls.round_index += 1
             cls.action_index = 0

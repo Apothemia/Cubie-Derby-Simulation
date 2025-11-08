@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import List
-from utils.game import CubieDerby
 import random
 
 
@@ -15,7 +14,7 @@ class Cube:
     extra_moves: int = 0
     last_action: dict | None = None
 
-    def __init__(self, game: CubieDerby):
+    def __init__(self, game):
         self.game = game
 
     def take_turn(self) -> None | dict:
@@ -45,6 +44,10 @@ class Cube:
 
     def _move_stack_to_position(self, moving_stack: List['Cube'], target_position: int):
         target_stack = self.game.get_stack_at_position(target_position)
+        for c in target_stack:
+            if isinstance(c, Jinhsi):
+                c.apply_jinhsi_skill(moving_stack, target_stack)
+                break
         max_stack_order = (max(c.stack_order for c in target_stack) + 1) if target_stack else 0
         for i, c in enumerate(moving_stack):
             c.position = target_position
@@ -134,7 +137,6 @@ class Cartethyia(Cube):
         pass
 
 
-# TODO: Need to test skill
 class Cantarella(Cube):
     name = 'Cantarella'
     skill_effect = 'Carrying passed cubes forward'
@@ -159,21 +161,41 @@ class Cantarella(Cube):
         pass
 
 
-# TODO: Implement skill
 class Jinhsi(Cube):
     name = 'Jinhsi'
-    skill_effect = '40% chance to move to stack top'
+    skill_effect = 'Cubes above, 40% chance to move to top'
+
+    def apply_jinhsi_skill(self, moving_stack: List['Cube'], target_stack: List['Cube']):
+        if random.random() < 0.4:
+            target_stack.remove(self)
+            moving_stack.append(self)
 
 
-# TODO: Implement skill
 class Changli(Cube):
     name = 'Changli'
-    skill_effect = '65% chance to move last next turn'
+    skill_effect = 'Cubes below, 65% chance to move last next turn'
+
+    def _move_stack_to_position(self, moving_stack: List['Cube'], target_position: int):
+        target_stack = self.game.get_stack_at_position(target_position)
+
+        # I don't know which skill triggers first, Changli's or Jinhsi's
+        for c in target_stack:
+            if isinstance(c, Jinhsi):
+                c.apply_jinhsi_skill(moving_stack, target_stack)
+                break
+
+        max_stack_order = (max(c.stack_order for c in target_stack) + 1) if target_stack else 0
+
+        if max_stack_order > 0 and random.random() < 0.65:
+            self.last_action['skill_activated'] = self.skill_effect
+
+        for i, c in enumerate(moving_stack):
+            c.position = target_position
+            c.stack_order = max_stack_order + i
 
 
 class Calcharo(Cube):
     name = 'Calcharo'
-    # skill_effect = 'Last to move (+3)' # Wrong skill effect?
     skill_effect = 'Last place (+3)'
 
     def _apply_skill_before_move(self) -> None:
@@ -192,19 +214,37 @@ class Shorekeeper(Cube):
         self.last_action['die_rolled'] = self.die_rolled
 
 
-# TODO: Need to test
 class Camellya(Cube):
     name = 'Camellya'
-    skill_effect = '+1 per cube on same pad'
+    skill_effect = '50% chance to get +1 per cube on same pad'
 
-    def _move_stack_to_position(self, moving_stack: List['Cube'], target_position: int):
-        if len(moving_stack) > 1 and random.random() < 0.5:
-            target_position += len(moving_stack) - 1
-            for cube in moving_stack:
-                cube.stack_order -= 1
-            moving_stack = [self]
+    def take_turn(self) -> None | dict:
+        self.last_action = {'cube_name': self.name}
+
+        self.roll_die()
+        self._apply_skill_before_move()
+
+        # Find all cubes in the same stack that will move together
+        new_position = min(self.position + self.die_rolled + self.extra_moves, self.game.num_of_pads - 1)
+        stack = self.game.get_stack_at_position(self.position)
+
+        # Trigger skill
+        if len(stack) > 1 and random.random() < 0.5:
+            new_position += len(stack) - 1
+            for cube in stack:
+                if cube.stack_order > self.stack_order:
+                    cube.stack_order -= 1
             self.last_action['skill_activated'] = self.skill_effect
-        super()._move_stack_to_position(moving_stack, target_position)
+            moving_stack = [self]
+        else:
+            moving_stack = sorted([c for c in stack if c.stack_order >= self.stack_order],
+                                  key=lambda x: x.stack_order)
+
+        self._move_stack_to_position(moving_stack, new_position)
+
+        self._apply_skill_after_move()
+
+        return self.last_action
 
 
 class Carlotta(Cube):
